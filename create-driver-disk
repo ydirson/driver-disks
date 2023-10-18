@@ -1,0 +1,79 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+set -e
+
+## support funcs
+
+die() {
+    echo >&2 "$0: ERROR: $*"
+    exit 1
+}
+
+die_usage() {
+    usage >&2
+    die "$@"
+}
+
+
+## parameter and environment handling, sanity checks
+
+usage() {
+    echo "Usage: $0 <driver-info.cfg>"
+}
+
+[ $# = 1 ] || die_usage "not enough arguments"
+
+# read config
+. "./$1"
+
+PACKAGE_NAME=$(rpm -q --qf "%{NAME}" -p "$RPM_FILE")
+RPM_VERSION=$(rpm -q --qf "%{VERSION}" -p "$RPM_FILE")
+RPM_RELEASE=$(rpm -q --qf "%{RELEASE}" -p "$RPM_FILE")
+GPG_UID=$(gpg --batch --with-colons "$GPG_PUBKEY_FILE" 2>/dev/null | awk -F: '$1=="pub" {print $5}')
+
+[ -r "$GPG_PUBKEY_FILE" ] || die "GPG_PUBKEY_FILE not found: '$GPG_PUBKEY_FILE'"
+
+PACK_VERSION="$RPM_VERSION+$RPM_RELEASE+$PACK_BUILD"
+ISO="${PACKAGE_NAME}-${PACK_VERSION}.iso"
+
+echo "$RPM_SHA256  $RPM_FILE" | sha256sum --check
+
+
+## the real stuff
+
+GROUPSFILE=$(mktemp groups-XXXXXX.xml)
+trap "rm '$GROUPSFILE'" EXIT
+
+sed -e "s/@DRIVER@/${PACKAGE_NAME}/g" > "$GROUPSFILE" <<EOF
+<!DOCTYPE comps PUBLIC "-//Red Hat, Inc.//DTD Comps info//EN" "comps.dtd">
+<comps>
+  <group>
+   <id>update</id>
+   <default>False</default>
+   <uservisible>True</uservisible>
+   <name>Driver Update</name>
+   <description></description>
+    <packagelist>
+      <packagereq type="mandatory">update-@DRIVER@</packagereq>
+    </packagelist>
+  </group>
+  <group>
+   <id>drivers</id>
+   <default>False</default>
+   <uservisible>True</uservisible>
+   <name>Host Installer Driver Update</name>
+   <description></description>
+    <packagelist>
+      <packagereq type="mandatory">update-@DRIVER@</packagereq>
+    </packagelist>
+  </group>
+</comps>
+EOF
+
+build-update --uuid "$PACK_UUID" --label "$PACKAGE_NAME" \
+             --version "$PACK_VERSION" \
+	     --description "$PACK_DESC" \
+	     --groupfile "$GROUPSFILE" \
+	     --key "$GPG_UID" --keyfile "$GPG_PUBKEY_FILE" \
+	     -o "$ISO" "$RPM_FILE"

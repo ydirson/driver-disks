@@ -1,0 +1,31 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+# from xenserver-ddk-files 1.0.2, Citrix Systems, Inc.
+
+set -e
+
+keyfile="$1"
+
+echo -n "Passphrase: "
+read -s passphrase
+echo
+
+gpg -k
+trap 'rm -f $HOME/.gnupg/create.*' EXIT
+cat >$HOME/.gnupg/create.key <<EOF
+    %echo Generating a test update key
+    Key-Type: RSA
+    Key-Length: 2048
+    Name-Real: Example Updates
+    Name-Comment: update
+    Name-Email: example@example.com
+    Expire-Date: 6m
+    ${passphrase:+Passphrase: $passphrase}
+    %commit
+    %echo done
+EOF
+
+gpg --verbose --batch --gen-key $HOME/.gnupg/create.key 2>&1 | tee $HOME/.gnupg/create.out
+hash=$(sed -ne 's/.* key \([^ ]*\) marked.*/\1/p' $HOME/.gnupg/create.out)
+gpg --output $keyfile --armor --export $hash
